@@ -1,0 +1,225 @@
+// ============================================================
+// VM Platform - Database Schema
+// This file defines every table in the system. Prisma will
+// turn this into real PostgreSQL tables automatically.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------- USERS & TEAMS ----------------
+
+enum Role {
+  ADMIN
+  SECURITY_ANALYST
+  ASSET_OWNER
+  EXECUTIVE_VIEWER
+  AUDITOR
+}
+
+model Team {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  users     User[]
+  assets    Asset[]
+  createdAt DateTime  @default(now())
+}
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(ASSET_OWNER)
+  teamId       String?
+  team         Team?    @relation(fields: [teamId], references: [id])
+  ownedAssets  Asset[]  @relation("AssetOwner")
+  createdAt    DateTime @default(now())
+}
+
+// ---------------- ASSETS ----------------
+
+enum Criticality {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum Environment {
+  PROD
+  STAGING
+  DEV
+}
+
+model Asset {
+  id             String      @id @default(uuid())
+  hostname       String
+  ip             String?
+  os             String?
+  environment    Environment @default(PROD)
+  internetFacing Boolean     @default(false)
+  criticality    Criticality @default(MEDIUM)
+  dataSensitive  Boolean     @default(false) // holds sensitive/compliance data -> business impact
+  compensatingControls String[] @default([]) // e.g. ["WAF","EDR"]
+  ownerId        String?
+  owner          User?       @relation("AssetOwner", fields: [ownerId], references: [id])
+  teamId         String?
+  team           Team?       @relation(fields: [teamId], references: [id])
+  lastScannedAt  DateTime?
+  discoveredAt   DateTime    @default(now())
+  isRogue        Boolean     @default(false) // discovered but not pre-registered
+  findings       Finding[]
+}
+
+// ---------------- FINDINGS (VULNERABILITIES) ----------------
+
+enum FindingStatus {
+  NEW
+  TRIAGED
+  IN_PROGRESS
+  FIX_APPLIED
+  RESCAN_PENDING
+  VERIFIED_CLOSED
+  FALSE_POSITIVE
+  RISK_ACCEPTED
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Finding {
+  id                String        @id @default(uuid())
+  cveId             String?
+  title             String
+  description       String
+  assetId           String
+  asset             Asset         @relation(fields: [assetId], references: [id])
+
+  // --- scoring inputs (raw) ---
+  cvssScore         Float?        // 0-10 from scanner/NVD
+  epssScore         Float?        // 0-1 probability, refreshed periodically
+  inKev             Boolean       @default(false) // CISA Known Exploited Vulnerabilities
+  hasPublicExploit  Boolean       @default(false)
+
+  // --- computed ---
+  riskScore         Float         @default(0) // 0-10 composite
+  riskBreakdown      Json?        // stores each component's contribution, for transparency
+  severity          Severity      @default(MEDIUM)
+
+  status            FindingStatus @default(NEW)
+  remediationAdvice String?
+
+  slaDeadline       DateTime?
+  reminder50Sent    Boolean       @default(false)
+  reminder75Sent    Boolean       @default(false)
+  reminder90Sent    Boolean       @default(false)
+  escalationSent    Boolean       @default(false)
+
+  firstDetectedAt   DateTime      @default(now())
+  lastSeenAt        DateTime      @default(now())
+  closedAt          DateTime?
+
+  ticket            Ticket?
+  rescanLogs        RescanLog[]
+  fpRequest         FalsePositiveRequest?
+  riskAcceptance    RiskAcceptance?
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+// ---------------- TICKETS ----------------
+
+model Ticket {
+  id          String   @id @default(uuid())
+  findingId   String   @unique
+  finding     Finding  @relation(fields: [findingId], references: [id])
+  externalRef String?  // e.g. Jira/ServiceNow key if integrated later
+  history     Json[]   @default([]) // simple audit trail of status changes
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------------- RESCAN / VERIFICATION LOG ----------------
+
+model RescanLog {
+  id          String   @id @default(uuid())
+  findingId   String
+  finding     Finding  @relation(fields: [findingId], references: [id])
+  triggeredBy String   // "auto" | userId
+  result      String   // "still_vulnerable" | "fixed" | "error"
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+// ---------------- FALSE POSITIVE WORKFLOW ----------------
+
+enum FPStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model FalsePositiveRequest {
+  id          String   @id @default(uuid())
+  findingId   String   @unique
+  finding     Finding  @relation(fields: [findingId], references: [id])
+  reason      String
+  scope       String   // "asset_only" | "asset_cve" | "org_wide"
+  requestedBy String
+  status      FPStatus @default(PENDING)
+  reviewedBy  String?
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+}
+
+// ---------------- RISK ACCEPTANCE WORKFLOW ----------------
+
+enum AcceptanceStatus {
+  PENDING
+  APPROVED
+  DENIED
+  EXPIRED
+}
+
+model RiskAcceptance {
+  id          String           @id @default(uuid())
+  findingId   String           @unique
+  finding     Finding          @relation(fields: [findingId], references: [id])
+  justification String
+  requestedBy String
+  status      AcceptanceStatus @default(PENDING)
+  reviewedBy  String?
+  expiresAt   DateTime
+  createdAt   DateTime         @default(now())
+}
+
+// ---------------- THREAT INTEL CACHE ----------------
+// Local cache of KEV list + EPSS scores so we don't hit external
+// APIs on every request. Refreshed by the scheduler.
+
+model ThreatIntelCache {
+  cveId       String   @id
+  inKev       Boolean  @default(false)
+  epssScore   Float?
+  updatedAt   DateTime @updatedAt
+}
+
+// ---------------- SLA CONFIG ----------------
+
+model SlaConfig {
+  id           String   @id @default(uuid())
+  severity     Severity @unique
+  slaDays      Int
+}
