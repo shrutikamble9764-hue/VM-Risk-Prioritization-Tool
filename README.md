@@ -1,8 +1,6 @@
 VM Platform
 A Standalone Vulnerability Management Platform
 
-Show Image Show Image Show Image Show Image
-
 VM Platform is a self-contained Vulnerability Management (VM) system built to address well-documented shortcomings in commercial scanners such as Qualys, Tenable, and Rapid7 — CVSS-only prioritization, high false-positive rates, unenforced SLAs, manual triage overhead, and unverified remediation closures. It covers the full lifecycle: risk scoring, asset inventory, notification automation, ticketing, and reporting.
 
 🔗 Live Demo: https://vm-risk-prioritization-tool.vercel.app Demo credentials: demo@example.com / Demo1234! (read-only viewer account)
