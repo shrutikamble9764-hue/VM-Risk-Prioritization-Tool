@@ -28,10 +28,31 @@ function StatCard({ label, value, sub, color }) {
 
 export default function Dashboard() {
   const [data, setData] = useState(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api.get("/dashboard/summary").then((res) => setData(res.data));
+    api
+      .get("/dashboard/summary")
+      .then((res) => setData(res.data))
+      .catch((err) => {
+        setError(
+          err.response?.data?.error ||
+            err.message ||
+            "Could not load dashboard data. Check that the backend is reachable."
+        );
+      });
   }, []);
+
+  if (error) {
+    return (
+      <Layout>
+        <div className="bg-red-50 text-red-700 p-4 rounded-lg border border-red-200">
+          <div className="font-semibold mb-1">Failed to load dashboard</div>
+          <div className="text-sm">{error}</div>
+        </div>
+      </Layout>
+    );
+  }
 
   if (!data) return <Layout><div>Loading dashboard...</div></Layout>;
 
